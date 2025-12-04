@@ -1,0 +1,11 @@
+{
+  "name": "restaurant-microservices",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "concurrently \"npx nodemon menu-service/server.js\" \"npx nodemon auth-service/server.js\" \"npx nodemon order-service/server.js\" \"npx nodemon gateway/server.js\"",
+    "dev:docker": "docker-compose up --build"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}

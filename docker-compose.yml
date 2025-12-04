@@ -1,0 +1,50 @@
+version: '3.9'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  gateway:
+    build: ./gateway
+    ports:
+      - "5000:5000"
+    depends_on:
+      - auth-service
+      - menu-service
+      - order-service
+
+  auth-service:
+    build: ./auth-service
+    ports:
+      - "5002:5002"
+    depends_on:
+      - mongodb
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017/auth_db
+
+  menu-service:
+    build: ./menu-service
+    ports:
+      - "5001:5001"
+    depends_on:
+      - mongodb
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017/menu_db
+
+  order-service:
+    build: ./order-service
+    ports:
+      - "5003:5003"
+    depends_on:
+      - mongodb
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017/order_db
+
+volumes:
+  mongo-data:
