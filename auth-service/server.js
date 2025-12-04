@@ -140,38 +140,29 @@ app.post('/admin/edit-request/:id/resolve', async (req, res) => {
   const request = await EditProfileRequest.findById(id).populate('userId');
   if (!request) return res.status(404).json({ error: "Not found" });
 
+  let updatedUser = null;
+
+  // Сначала обновляем пользователя (если approve)
   if (action === 'approve') {
-    const updatedUser = await User.findByIdAndUpdate(
-        request.userId._id,
-        {
-            name: request.newData.name,
-            email: request.newData.email,
-            phone: request.newData.phone,
-            avatar: request.newData.avatar
-        },
-        { new: true }  // ← ВАЖНО: возвращать обновлённый документ
+    updatedUser = await User.findByIdAndUpdate(
+      request.userId._id,
+      {
+        name: request.newData.name,
+        email: request.newData.email,
+        phone: request.newData.phone,
+        avatar: request.newData.avatar
+      },
+      { new: true }
     );
+  }
 
-    // Отправляем клиенту свежие данные!
-    return res.json({ 
-        success: true, 
-        user: {
-            id: updatedUser._id,
-            name: updatedUser.name,
-            email: updatedUser.email,
-            phone: updatedUser.phone,
-            isAdmin: updatedUser.isAdmin,
-            avatar: updatedUser.avatar
-        }
-    });
-}
-
+  // ← Теперь обновляем статус заявки
   request.status = action === 'approve' ? 'approved' : 'rejected';
   request.processedAt = new Date();
   request.processedBy = adminId;
   await request.save();
 
-  // ← ТЕПЕРЬ Notification УЖЕ СУЩЕСТВУЕТ!
+  // ← Создаём уведомление
   const notificationTitle = action === 'approve' 
     ? "Изменения профиля одобрены"
     : "Изменения профиля отклонены";
@@ -188,10 +179,20 @@ app.post('/admin/edit-request/:id/resolve', async (req, res) => {
     isRead: false,
     createdAt: new Date()
   });
+  await notification.save();
 
-  await notification.save(); // ← Теперь сохранится без ошибок!
-
-  res.json({ success: true });
+  // ← Только теперь отвечаем клиенту
+  res.json({ 
+    success: true,
+    user: updatedUser ? {
+      id: updatedUser._id,
+      name: updatedUser.name,
+      email: updatedUser.email,
+      phone: updatedUser.phone,
+      isAdmin: updatedUser.isAdmin,
+      avatar: updatedUser.avatar
+    } : null
+  });
 });
 
 // Получить уведомления пользователя
