@@ -104,7 +104,7 @@ app.post('/profile/edit-request', async (req, res) => {
 
 app.get('/admin/edit-requests', async (req, res) => {
   const requests = await EditProfileRequest.find({ status: "pending" })
-    .populate('userId', 'name email')
+    .populate('userId', 'name email avatar')
     .populate('processedBy', 'name')
     .sort({ requestedAt: -1 });
   res.json(requests);
