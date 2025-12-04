@@ -1,14 +1,31 @@
 version: '3.9'
 
 services:
+  mongodb:
+    image: mongo:7
+    container_name: mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
   gateway:
     build: ./gateway
     ports:
       - "5000:5000"
     depends_on:
-      - auth-service
-      - menu-service
-      - order-service
+      mongodb:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      menu-service:
+        condition: service_started
+      order-service:
+        condition: service_started
     environment:
       - DOCKER=true
 
@@ -16,22 +33,31 @@ services:
     build: ./auth-service
     ports:
       - "5002:5002"
+    depends_on:
+      mongodb:
+        condition: service_healthy
     environment:
-      - MONGO_URI=mongodb://host.docker.internal:27017/auth_db
+      - MONGO_URI=mongodb://mongodb:27017/auth_db
       - DOCKER=true
 
   menu-service:
     build: ./menu-service
     ports:
       - "5001:5001"
+    depends_on:
+      mongodb:
+        condition: service_healthy
     environment:
-      - MONGO_URI=mongodb://host.docker.internal:27017/menu_db
+      - MONGO_URI=mongodb://mongodb:27017/menu_db
       - DOCKER=true
 
   order-service:
     build: ./order-service
     ports:
       - "5003:5003"
+    depends_on:
+      mongodb:
+        condition: service_healthy
     environment:
-      - MONGO_URI=mongodb://host.docker.internal:27017/order_db
+      - MONGO_URI=mongodb://mongodb:27017/order_db
       - DOCKER=true
