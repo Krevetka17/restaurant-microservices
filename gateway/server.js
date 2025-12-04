@@ -8,23 +8,18 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/api/menu', createProxyMiddleware({
-  target: 'http://localhost:5001',
+  target: process.env.DOCKER ? 'http://menu-service:5001' : 'http://localhost:5001',
   changeOrigin: true,
-  pathRewrite: {
-    '^/api/menu': ''  // ← ВОТ ЭТО ГЛАВНОЕ! Убираем /api/menu полностью
-  },
-  onProxyReq: (proxyReq, req, res) => {
-    console.log('Запрос:', req.url, '→', proxyReq.path);
-  }
+  pathRewrite: { '^/api/menu': '' },
 }));
 
 app.use('/api/auth', createProxyMiddleware({ 
-  target: 'http://localhost:5002', 
+  target: process.env.DOCKER ? 'http://auth-service:5002' : 'http://localhost:5002', 
   changeOrigin: true 
 }));
 
 app.use('/api/orders', createProxyMiddleware({ 
-  target: 'http://localhost:5003', 
+  target: process.env.DOCKER ? 'http://order-service:5003' : 'http://localhost:5003', 
   changeOrigin: true 
 }));
 

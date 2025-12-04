@@ -22,7 +22,6 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// === ПЕРЕМЕЩАЕМ СЮДА ВСЕ МОДЕЛИ, ЧТОБЫ ОНИ БЫЛИ ДОЛЖНЫ ===
 const notificationSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   title: { type: String, required: true },
@@ -32,7 +31,7 @@ const notificationSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-const Notification = mongoose.model('Notification', notificationSchema); // ← СЕЙЧАС ОПРЕДЕЛЕНА!
+const Notification = mongoose.model('Notification', notificationSchema);
 
 const editProfileRequestSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -45,7 +44,6 @@ const editProfileRequestSchema = new mongoose.Schema({
 });
 
 const EditProfileRequest = mongoose.model('EditProfileRequest', editProfileRequestSchema);
-// ==============================================================
 
 const app = express();
 app.use(cors());
@@ -153,10 +151,9 @@ app.post('/admin/edit-request/:id/resolve', async (req, res) => {
             phone: request.newData.phone,
             avatar: request.newData.avatar
         },
-        { new: true }  // ← ВАЖНО: возвращать обновлённый документ
+        { new: true }
     );
 
-    // Отправляем клиенту свежие данные!
     return res.json({ 
         success: true, 
         user: {
@@ -168,14 +165,13 @@ app.post('/admin/edit-request/:id/resolve', async (req, res) => {
             avatar: updatedUser.avatar
         }
     });
-}
+  }
 
   request.status = action === 'approve' ? 'approved' : 'rejected';
   request.processedAt = new Date();
   request.processedBy = adminId;
   await request.save();
 
-  // ← ТЕПЕРЬ Notification УЖЕ СУЩЕСТВУЕТ!
   const notificationTitle = action === 'approve' 
     ? "Изменения профиля одобрены"
     : "Изменения профиля отклонены";
@@ -193,8 +189,7 @@ app.post('/admin/edit-request/:id/resolve', async (req, res) => {
     createdAt: new Date()
   });
 
-  await notification.save(); // ← Теперь сохранится без ошибок!
-
+  await notification.save();
   res.json({ success: true });
 });
 
