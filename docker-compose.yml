@@ -1,15 +1,6 @@
 version: '3.9'
 
 services:
-  mongodb:
-    image: mongo:7
-    container_name: mongodb
-    restart: always
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo-data:/data/db
-
   gateway:
     build: ./gateway
     ports:
@@ -18,33 +9,29 @@ services:
       - auth-service
       - menu-service
       - order-service
+    environment:
+      - DOCKER=true
 
   auth-service:
     build: ./auth-service
     ports:
       - "5002:5002"
-    depends_on:
-      - mongodb
     environment:
-      - MONGO_URI=mongodb://mongodb:27017/auth_db
+      - MONGO_URI=mongodb://host.docker.internal:27017/auth_db
+      - DOCKER=true
 
   menu-service:
     build: ./menu-service
     ports:
       - "5001:5001"
-    depends_on:
-      - mongodb
     environment:
-      - MONGO_URI=mongodb://mongodb:27017/menu_db
+      - MONGO_URI=mongodb://host.docker.internal:27017/menu_db
+      - DOCKER=true
 
   order-service:
     build: ./order-service
     ports:
       - "5003:5003"
-    depends_on:
-      - mongodb
     environment:
-      - MONGO_URI=mongodb://mongodb:27017/order_db
-
-volumes:
-  mongo-data:
+      - MONGO_URI=mongodb://host.docker.internal:27017/order_db
+      - DOCKER=true
