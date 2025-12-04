@@ -2,11 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
-mongoose.connect(
-  process.env.MONGO_URI || 
-  (process.env.DOCKER ? 'mongodb://mongodb:27017' : 'mongodb://localhost:27017') +
-  '/order_db'
-);
+mongoose.connect('mongodb://localhost:27017/order_db');
 
 const orderSchema = new mongoose.Schema({
   userId: String,

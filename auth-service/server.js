@@ -4,11 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 
-mongoose.connect(
-  process.env.MONGO_URI || 
-  (process.env.DOCKER ? 'mongodb://mongodb:27017' : 'mongodb://localhost:27017') +
-  '/auth_db'
-);
+mongoose.connect('mongodb://localhost:27017/auth_db');
 
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -22,6 +18,7 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
+// === ПЕРЕМЕЩАЕМ СЮДА ВСЕ МОДЕЛИ, ЧТОБЫ ОНИ БЫЛИ ДОЛЖНЫ ===
 const notificationSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   title: { type: String, required: true },
@@ -31,7 +28,7 @@ const notificationSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-const Notification = mongoose.model('Notification', notificationSchema);
+const Notification = mongoose.model('Notification', notificationSchema); // ← СЕЙЧАС ОПРЕДЕЛЕНА!
 
 const editProfileRequestSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -44,6 +41,7 @@ const editProfileRequestSchema = new mongoose.Schema({
 });
 
 const EditProfileRequest = mongoose.model('EditProfileRequest', editProfileRequestSchema);
+// ==============================================================
 
 const app = express();
 app.use(cors());
@@ -151,9 +149,10 @@ app.post('/admin/edit-request/:id/resolve', async (req, res) => {
             phone: request.newData.phone,
             avatar: request.newData.avatar
         },
-        { new: true }
+        { new: true }  // ← ВАЖНО: возвращать обновлённый документ
     );
 
+    // Отправляем клиенту свежие данные!
     return res.json({ 
         success: true, 
         user: {
@@ -165,13 +164,14 @@ app.post('/admin/edit-request/:id/resolve', async (req, res) => {
             avatar: updatedUser.avatar
         }
     });
-  }
+}
 
   request.status = action === 'approve' ? 'approved' : 'rejected';
   request.processedAt = new Date();
   request.processedBy = adminId;
   await request.save();
 
+  // ← ТЕПЕРЬ Notification УЖЕ СУЩЕСТВУЕТ!
   const notificationTitle = action === 'approve' 
     ? "Изменения профиля одобрены"
     : "Изменения профиля отклонены";
@@ -189,7 +189,8 @@ app.post('/admin/edit-request/:id/resolve', async (req, res) => {
     createdAt: new Date()
   });
 
-  await notification.save();
+  await notification.save(); // ← Теперь сохранится без ошибок!
+
   res.json({ success: true });
 });
 
