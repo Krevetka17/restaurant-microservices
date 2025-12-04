@@ -42,10 +42,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get('/menu', async (req, res) => {
+// ← ВОТ ЭТО ГЛАВНОЕ! Роут теперь на корне!
+app.get('/', async (req, res) => {
   try {
     const items = await Menu.find();
-    // Если пусто — возвращаем заглушку (для CI)
     if (items.length === 0) {
       return res.json([
         { name: "Test Pizza", price: 100, category: "food" }
