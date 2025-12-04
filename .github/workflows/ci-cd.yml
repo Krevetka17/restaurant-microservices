@@ -19,7 +19,7 @@ jobs:
           --health-cmd="mongosh --eval 'db.runCommand({ping: 1})'"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=5
+          --health-retries=10
 
     steps:
       - name: Checkout code
@@ -35,32 +35,47 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Get short Git SHA
-        id: vars
-        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
-      - name: Start services (Docker Compose)
+      - name: Start services
         run: |
           docker compose up -d --build
-          echo "Ждём запуска сервисов..."
-          sleep 30
+
+      - name: Wait for MongoDB
+        run: |
+          until docker exec $(docker ps -qf "name=mongodb") mongosh --eval "db.runCommand({ping: 1})" >/dev/null 2>&1; do
+            echo "Ждём MongoDB..."
+            sleep 5
+          done
+
+      - name: Wait for Menu Service (health check)
+        run: |
+          timeout=60
+          elapsed=0
+          until curl -f http://localhost:5001/ >/dev/null 2>&1 || [ $elapsed -ge $timeout ]; do
+            echo "Ждём menu-service... ($elapsed сек)"
+            sleep 3
+            elapsed=$((elapsed + 3))
+          done
+          if [ $elapsed -ge $timeout ]; then
+            echo "menu-service не запустился!"
+            exit 1
+          fi
 
       - name: Test Gateway → Menu Service
         run: |
-          curl -f http://localhost:5000/api/menu > /dev/null || exit 1
-          echo "Меню работает!"
+          curl -f http://localhost:5000/api/menu || exit 1
+          echo "МЕНЮ РАБОТАЕТ!"
 
-      - name: Test Auth Service (register test user)
+      - name: Test Auth Service
         run: |
           curl -X POST http://localhost:5002/register \
             -H "Content-Type: application/json" \
-            -d '{"name":"ci-test","email":"ci@test.com","password":"123456"}' || exit 1
-          echo "Регистрация прошла!"
+            -d '{"name":"test","email":"test@example.com","password":"123456"}' || exit 1
+          echo "АВТОРИЗАЦИЯ РАБОТАЕТ!"
 
-      - name: Build & Push Docker Images (only on push)
+      - name: Build & Push Docker Images
         if: github.event_name == 'push'
         run: |
-          TAG=${{ steps.vars.outputs.sha_short }}
+          TAG=$(git rev-parse --short HEAD)
           REPO=${{ secrets.DOCKERHUB_USERNAME }}
 
           docker build -t $REPO/restaurant-gateway:latest -t $REPO/restaurant-gateway:$TAG ./gateway
@@ -73,7 +88,7 @@ jobs:
           docker push $REPO/restaurant-menu --all-tags
           docker push $REPO/restaurant-orders --all-tags
 
-          echo "ВСЕ ОБРАЗЫ ЗАГРУЖЕНЫ В DOCKER HUB!"
+          echo "ВСЁ ЗАГРУЖЕНО В DOCKER HUB!"
 
       - name: Success
-        run: echo "CI/CD прошёл успешно!"
+        run: echo "CI/CD ПРОШЁЛ ИДЕАЛЬНО!"
