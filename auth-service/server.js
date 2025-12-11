@@ -73,21 +73,33 @@ app.post('/register', async (req, res) => {
   });
 });
 
-// Логин
+// Логин — по email или login
 app.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email });
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(401).json({ error: "Неверные данные" });
+  const { email, password } = req.body;  
+  
+  if (!email || !password) {
+    return res.status(400).json({ error: "Введите логин/email и пароль" });
   }
+
+  const user = await User.findOne({
+    $or: [
+      { email: email },
+      { login: email }  
+    ]
+  });
+
+  if (!user || !(await bcrypt.compare(password, user.password))) {
+    return res.status(401).json({ error: "Неверный логин/email или пароль" });
+  }
+
   const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: THIRTY_DAYS });
   res.json({
     token,
     user: { 
       id: user._id, 
       name: user.name, 
-      email: user.email, 
-      phone: user.phone, 
+      email: user.email,
+      phone: user.phone,
       isAdmin: user.isAdmin,
       avatar: user.avatar
     }
