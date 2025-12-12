@@ -27,7 +27,21 @@ app.use('/api/orders', createProxyMiddleware({
   changeOrigin: true 
 }));
 
+app.use('/api/admin', createProxyMiddleware({ 
+  target: 'http://localhost:5004', 
+  changeOrigin: true 
+}));
+
+app.use('/api/support', createProxyMiddleware({ 
+  target: 'http://localhost:5005', 
+  changeOrigin: true 
+}));
+
 app.listen(5000, () => {
   console.log('GATEWAY РАБОТАЕТ: http://localhost:5000');
   console.log('МЕНЮ: http://localhost:5000/api/menu');
+  console.log('АВТОРИЗАЦИЯ: http://localhost:5000/api/auth');
+  console.log('ЗАКАЗЫ: http://localhost:5000/api/orders');
+  console.log('АДМИН: http://localhost:5000/api/admin');
+  console.log('ПОДДЕРЖКА: http://localhost:5000/api/support');
 });
