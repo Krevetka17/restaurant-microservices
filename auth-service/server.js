@@ -18,7 +18,6 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model('User', userSchema);
 
-// === ПЕРЕМЕЩАЕМ СЮДА ВСЕ МОДЕЛИ, ЧТОБЫ ОНИ БЫЛИ ДОЛЖНЫ ===
 const notificationSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   title: { type: String, required: true },
@@ -28,7 +27,7 @@ const notificationSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-const Notification = mongoose.model('Notification', notificationSchema); // ← СЕЙЧАС ОПРЕДЕЛЕНА!
+const Notification = mongoose.model('Notification', notificationSchema); 
 
 const editProfileRequestSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -41,7 +40,6 @@ const editProfileRequestSchema = new mongoose.Schema({
 });
 
 const EditProfileRequest = mongoose.model('EditProfileRequest', editProfileRequestSchema);
-// ==============================================================
 
 const app = express();
 app.use(cors());
