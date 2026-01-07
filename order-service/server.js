@@ -5,7 +5,7 @@ const cors = require('cors');
 mongoose.connect('mongodb://localhost:27017/order_db');
 
 const orderSchema = new mongoose.Schema({
-  userId: String,
+  userId: { type: String, required: true }, // Обязательное поле
   items: Array,
   total: Number,
   delivery: { type: Boolean, required: true },
@@ -24,12 +24,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// POST /orders
+// POST /orders — теперь строго требует userId
 app.post('/orders', async (req, res) => {
   try {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: "userId обязателен" });
+    }
+
     const { delivery, tableNumber, reservationDate, startTime, endTime } = req.body;
 
-    if (!delivery && endTime) { // для reserve (с endTime)
+    if (!delivery && endTime) {
       if (!tableNumber || !reservationDate || !startTime || !endTime) {
         return res.status(400).json({ success: false, message: "Для брони нужны все данные" });
       }
@@ -48,7 +53,7 @@ app.post('/orders', async (req, res) => {
       }
     }
 
-    const order = new Order(req.body);
+    const order = new Order(req.body); // userId теперь обязателен в body
     await order.save();
     res.json({ success: true, orderId: order._id });
   } catch (error) {
@@ -63,11 +68,12 @@ app.get('/orders/:userId', async (req, res) => {
     const orders = await Order.find({ userId: req.params.userId }).sort({ createdAt: -1 });
     res.json(orders);
   } catch (error) {
+    console.error(error);
     res.status(500).json({ success: false });
   }
 });
 
-// GET /tables/available?date=...&start=...&duration=...
+// Остальные эндпоинты без изменений
 app.get('/tables/available', async (req, res) => {
   try {
     const { date, start, duration = 120 } = req.query;
@@ -93,7 +99,6 @@ app.get('/tables/available', async (req, res) => {
   }
 });
 
-// Новый: GET /tables/available-interval?date=...&start=...&end=...
 app.get('/tables/available-interval', async (req, res) => {
   try {
     const { date, start, end } = req.query;
