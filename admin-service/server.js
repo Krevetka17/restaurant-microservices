@@ -3,10 +3,14 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const axios = require('axios');
 
-mongoose.connect('mongodb://localhost:27017/order_db');
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-const orderSchema = new mongoose.Schema({
-  userId: { type: String, required: true },
+// Подключение к order_db
+const orderConn = mongoose.createConnection('mongodb://localhost:27017/order_db');
+const Order = orderConn.model('Order', new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, required: true },
   items: Array,
   total: Number,
   delivery: { type: Boolean, required: true },
@@ -18,25 +22,27 @@ const orderSchema = new mongoose.Schema({
   status: { type: String, default: "new" },
   rejectionReason: { type: String },
   createdAt: { type: Date, default: Date.now }
-});
+}));
 
-const Order = mongoose.model('Order', orderSchema);
-
-const app = express();
-app.use(cors());
-app.use(express.json());
+// Подключение к auth_db для уведомлений
+const authConn = mongoose.createConnection('mongodb://localhost:27017/auth_db');
+const Notification = authConn.model('Notification', new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, required: true },
+  title: { type: String, required: true },
+  message: { type: String, required: true },
+  category: { type: String, default: "Администрация" },
+  isRead: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now }
+}));
 
 const MENU_SERVICE_URL = 'http://localhost:5001/menu';
 
-// Кэш меню (чтобы не запрашивать каждый раз)
 let menuCache = null;
 let cacheTime = 0;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 минут
+const CACHE_DURATION = 5 * 60 * 1000;
 
 const getMenu = async () => {
-  if (menuCache && Date.now() - cacheTime < CACHE_DURATION) {
-    return menuCache;
-  }
+  if (menuCache && Date.now() - cacheTime < CACHE_DURATION) return menuCache;
   try {
     const response = await axios.get(MENU_SERVICE_URL);
     menuCache = response.data.reduce((map, item) => {
@@ -46,12 +52,11 @@ const getMenu = async () => {
     cacheTime = Date.now();
     return menuCache;
   } catch (error) {
-    console.error('Ошибка получения меню:', error.message);
+    console.error('Ошибка меню:', error.message);
     return {};
   }
 };
 
-// Получить ожидающие заказы с названиями блюд
 app.get('/admin/orders/pending', async (req, res) => {
   try {
     const pending = await Order.find({ status: "new" }).sort({ createdAt: -1 });
@@ -64,11 +69,7 @@ app.get('/admin/orders/pending', async (req, res) => {
         quantity: item.quantity,
         price: item.price
       }));
-
-      return {
-        ...order.toObject(),
-        items: enrichedItems
-      };
+      return { ...order.toObject(), items: enrichedItems };
     });
 
     res.json(enriched);
@@ -78,7 +79,6 @@ app.get('/admin/orders/pending', async (req, res) => {
   }
 });
 
-// Подтвердить заказ
 app.post('/admin/orders/:id/confirm', async (req, res) => {
   try {
     const order = await Order.findByIdAndUpdate(
@@ -87,13 +87,21 @@ app.post('/admin/orders/:id/confirm', async (req, res) => {
       { new: true }
     );
     if (!order) return res.status(404).json({ success: false });
-    res.json({ success: true, order });
+
+    await Notification.create({
+      userId: order.userId,  // уже ObjectId — просто передаём
+      title: "Заказ подтверждён",
+      message: `Ваш заказ №${order._id.toString().slice(-6)} подтверждён администрацией! Проверьте в "Мои заказы/Бронь".`,
+      category: "Администрация"
+    });
+
+    res.json({ success: true });
   } catch (error) {
+    console.error('Ошибка подтверждения:', error);
     res.status(500).json({ success: false });
   }
 });
 
-// Отклонить заказ
 app.post('/admin/orders/:id/reject', async (req, res) => {
   try {
     const { reason } = req.body;
@@ -105,12 +113,21 @@ app.post('/admin/orders/:id/reject', async (req, res) => {
       { new: true }
     );
     if (!order) return res.status(404).json({ success: false });
-    res.json({ success: true, order });
+
+    await Notification.create({
+      userId: order.userId,  // уже ObjectId — просто передаём
+      title: "Заказ отклонён",
+      message: `Ваш заказ №${order._id.toString().slice(-6)} отклонён. Причина: ${reason}. Проверьте в "Мои заказы/Бронь".`,
+      category: "Администрация"
+    });
+
+    res.json({ success: true });
   } catch (error) {
+    console.error('Ошибка отклонения:', error);
     res.status(500).json({ success: false });
   }
 });
 
 app.listen(5004, () => {
-  console.log('Admin Service (заказы): http://localhost:5004'); 
+  console.log('Admin Service (заказы): http://localhost:5004');
 });
