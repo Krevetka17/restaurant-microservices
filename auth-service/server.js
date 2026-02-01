@@ -1,8 +1,10 @@
+require('dotenv').config({ path: __dirname + '/.env' });
 const express = require('express');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 mongoose.connect('mongodb://localhost:27017/auth_db');
 
@@ -13,7 +15,8 @@ const userSchema = new mongoose.Schema({
   phone: String,
   password: { type: String, required: true },
   isAdmin: { type: Boolean, default: false },
-  avatar: { type: String }
+  avatar: { type: String },
+  stripeCustomerId: { type: String }
 });
 
 const User = mongoose.model('User', userSchema);
@@ -27,7 +30,7 @@ const notificationSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
-const Notification = mongoose.model('Notification', notificationSchema); 
+const Notification = mongoose.model('Notification', notificationSchema);
 
 const editProfileRequestSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -48,6 +51,117 @@ app.use(express.json());
 const JWT_SECRET = "secret123";
 const THIRTY_DAYS = 30 * 24 * 60 * 60;
 
+// Создать SetupIntent
+app.post('/setup-intent', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: "Нет токена" });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    let user = await User.findById(decoded.userId);
+    if (!user) return res.status(404).json({ error: "Пользователь не найден" });
+
+    if (!user.stripeCustomerId) {
+      const customer = await stripe.customers.create({
+        email: user.email,
+        name: user.name,
+        metadata: { mongoId: user._id.toString() }
+      });
+      user.stripeCustomerId = customer.id;
+      await user.save();
+    }
+
+    const setupIntent = await stripe.setupIntents.create({
+      customer: user.stripeCustomerId,
+      payment_method_types: ['card'],
+      usage: 'off_session'
+    });
+
+    res.json({ clientSecret: setupIntent.client_secret });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Подтвердить SetupIntent (вызывается после успешного PaymentSheet)
+app.post('/confirm-setup', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: "Нет токена" });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await User.findById(decoded.userId);
+    if (!user || !user.stripeCustomerId) return res.status(404).json({ error: "Нет клиента" });
+
+    const { payment_method } = req.body;
+    if (!payment_method) return res.status(400).json({ error: "Нет payment_method" });
+
+    await stripe.paymentMethods.attach(payment_method, {
+      customer: user.stripeCustomerId,
+    });
+
+    await stripe.customers.update(user.stripeCustomerId, {
+      invoice_settings: { default_payment_method: payment_method },
+    });
+
+    const pmList = await stripe.paymentMethods.list({
+      customer: user.stripeCustomerId,
+      type: 'card',
+    });
+
+    const paymentMethods = pmList.data.map(pm => ({
+      id: pm.id,
+      cardNumber: `**** **** **** ${pm.card.last4}`,
+      expiry: `${pm.card.exp_month.toString().padStart(2, '0')}/${(pm.card.exp_year % 100).toString().padStart(2, '0')}`,
+      brand: pm.card.brand
+    }));
+
+    res.json({ success: true, paymentMethods });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Получить текущего пользователя
+app.get('/me', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: "Нет токена" });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await User.findById(decoded.userId);
+    if (!user) return res.status(404).json({ error: "Пользователь не найден" });
+
+    let paymentMethods = [];
+    if (user.stripeCustomerId) {
+      const pmList = await stripe.paymentMethods.list({
+        customer: user.stripeCustomerId,
+        type: 'card',
+        limit: 10
+      });
+      paymentMethods = pmList.data.map(pm => ({
+        id: pm.id,
+        cardNumber: `**** **** **** ${pm.card.last4}`,
+        expiry: `${pm.card.exp_month.toString().padStart(2, '0')}/${(pm.card.exp_year % 100).toString().padStart(2, '0')}`,
+        brand: pm.card.brand
+      }));
+    }
+
+    res.json({
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      isAdmin: user.isAdmin,
+      avatar: user.avatar,
+      stripeCustomerId: user.stripeCustomerId,
+      paymentMethods
+    });
+  } catch (e) {
+    res.status(401).json({ error: "Недействительный токен" });
+  }
+});
+
 // Регистрация
 app.post('/register', async (req, res) => {
   const { name, login, email, phone, password } = req.body;
@@ -60,32 +174,23 @@ app.post('/register', async (req, res) => {
   const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: THIRTY_DAYS });
   res.json({
     token,
-    user: { 
-      id: user._id, 
-      name: user.name, 
-      email: user.email, 
-      phone: user.phone, 
+    user: {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
       isAdmin: user.isAdmin,
       avatar: user.avatar
     }
   });
 });
 
-// Логин — по email или login
+// Логин
 app.post('/login', async (req, res) => {
-  const { email, password } = req.body;  
-  
-  if (!email || !password) {
-    return res.status(400).json({ error: "Введите логин/email и пароль" });
-  }
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: "Введите логин/email и пароль" });
 
-  const user = await User.findOne({
-    $or: [
-      { email: email },
-      { login: email }  
-    ]
-  });
-
+  const user = await User.findOne({ $or: [{ email }, { login: email }] });
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ error: "Неверный логин/email или пароль" });
   }
@@ -93,9 +198,9 @@ app.post('/login', async (req, res) => {
   const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: THIRTY_DAYS });
   res.json({
     token,
-    user: { 
-      id: user._id, 
-      name: user.name, 
+    user: {
+      id: user._id,
+      name: user.name,
       email: user.email,
       phone: user.phone,
       isAdmin: user.isAdmin,
@@ -104,108 +209,7 @@ app.post('/login', async (req, res) => {
   });
 });
 
-// === ЗАПРОСЫ НА РЕДАКТИРОВАНИЕ ===
-app.post('/profile/edit-request', async (req, res) => {
-  const { userId, oldData, newData } = req.body;
-  const request = new EditProfileRequest({ userId, oldData, newData });
-  await request.save();
-  res.json({ success: true, request });
-});
-
-app.get('/admin/edit-requests', async (req, res) => {
-  const requests = await EditProfileRequest.find({ status: "pending" })
-    .populate('userId', 'name email avatar')
-    .populate('processedBy', 'name')
-    .sort({ requestedAt: -1 });
-  res.json(requests);
-});
-
-app.get('/me', async (req, res) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: "Нет токена" });
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const user = await User.findById(decoded.userId);
-    if (!user) return res.status(404).json({ error: "Пользователь не найден" });
-
-    res.json({
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      phone: user.phone,
-      isAdmin: user.isAdmin,
-      avatar: user.avatar
-    });
-  } catch (e) {
-    res.status(401).json({ error: "Недействительный токен" });
-  }
-});
-
-// Обработать запрос (принять/отклонить)
-app.post('/admin/edit-request/:id/resolve', async (req, res) => {
-  const { id } = req.params;
-  const { action, adminId } = req.body;
-
-  const request = await EditProfileRequest.findById(id).populate('userId');
-  if (!request) return res.status(404).json({ error: "Not found" });
-
-  let updatedUser = null;
-
-  // Сначала обновляем пользователя (если approve)
-  if (action === 'approve') {
-    updatedUser = await User.findByIdAndUpdate(
-      request.userId._id,
-      {
-        name: request.newData.name,
-        email: request.newData.email,
-        phone: request.newData.phone,
-        avatar: request.newData.avatar
-      },
-      { new: true }
-    );
-  }
-
-  // ← Теперь обновляем статус заявки
-  request.status = action === 'approve' ? 'approved' : 'rejected';
-  request.processedAt = new Date();
-  request.processedBy = adminId;
-  await request.save();
-
-  // ← Создаём уведомление
-  const notificationTitle = action === 'approve' 
-    ? "Изменения профиля одобрены"
-    : "Изменения профиля отклонены";
-
-  const notificationMessage = action === 'approve'
-    ? "Ваши новые данные успешно сохранены!"
-    : "Администратор отклонил изменения. Попробуйте позже.";
-
-  const notification = new Notification({
-    userId: request.userId._id,
-    title: notificationTitle,
-    message: notificationMessage,
-    category: "Администрация",
-    isRead: false,
-    createdAt: new Date()
-  });
-  await notification.save();
-
-  // ← Только теперь отвечаем клиенту
-  res.json({ 
-    success: true,
-    user: updatedUser ? {
-      id: updatedUser._id,
-      name: updatedUser.name,
-      email: updatedUser.email,
-      phone: updatedUser.phone,
-      isAdmin: updatedUser.isAdmin,
-      avatar: updatedUser.avatar
-    } : null
-  });
-});
-
-// Получить уведомления пользователя
+// Уведомления
 app.get('/notifications', async (req, res) => {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: "Нет токена" });
@@ -241,6 +245,80 @@ app.post('/notifications/:id/read', async (req, res) => {
   } catch (e) {
     res.status(401).json({ error: "Недействительный токен" });
   }
+});
+
+// Запросы на редактирование профиля
+app.post('/profile/edit-request', async (req, res) => {
+  const { userId, oldData, newData } = req.body;
+  const request = new EditProfileRequest({ userId, oldData, newData });
+  await request.save();
+  res.json({ success: true, request });
+});
+
+app.get('/admin/edit-requests', async (req, res) => {
+  const requests = await EditProfileRequest.find({ status: "pending" })
+    .populate('userId', 'name email avatar')
+    .populate('processedBy', 'name')
+    .sort({ requestedAt: -1 });
+  res.json(requests);
+});
+
+app.post('/admin/edit-request/:id/resolve', async (req, res) => {
+  const { id } = req.params;
+  const { action, adminId } = req.body;
+
+  const request = await EditProfileRequest.findById(id).populate('userId');
+  if (!request) return res.status(404).json({ error: "Not found" });
+
+  let updatedUser = null;
+
+  if (action === 'approve') {
+    updatedUser = await User.findByIdAndUpdate(
+      request.userId._id,
+      {
+        name: request.newData.name,
+        email: request.newData.email,
+        phone: request.newData.phone,
+        avatar: request.newData.avatar
+      },
+      { new: true }
+    );
+  }
+
+  request.status = action === 'approve' ? 'approved' : 'rejected';
+  request.processedAt = new Date();
+  request.processedBy = adminId;
+  await request.save();
+
+  const notificationTitle = action === 'approve'
+    ? "Изменения профиля одобрены"
+    : "Изменения профиля отклонены";
+
+  const notificationMessage = action === 'approve'
+    ? "Ваши новые данные успешно сохранены!"
+    : "Администратор отклонил изменения. Попробуйте позже.";
+
+  const notification = new Notification({
+    userId: request.userId._id,
+    title: notificationTitle,
+    message: notificationMessage,
+    category: "Администрация",
+    isRead: false,
+    createdAt: new Date()
+  });
+  await notification.save();
+
+  res.json({
+    success: true,
+    user: updatedUser ? {
+      id: updatedUser._id,
+      name: updatedUser.name,
+      email: updatedUser.email,
+      phone: updatedUser.phone,
+      isAdmin: updatedUser.isAdmin,
+      avatar: updatedUser.avatar
+    } : null
+  });
 });
 
 app.listen(5002, () => console.log("Auth Service: http://localhost:5002"));
