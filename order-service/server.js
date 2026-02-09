@@ -5,7 +5,7 @@ const cors = require('cors');
 mongoose.connect('mongodb://localhost:27017/order_db');
 
 const orderSchema = new mongoose.Schema({
-  userId: { type: String, required: true }, // Обязательное поле
+  userId: { type: String, required: true },
   items: Array,
   total: Number,
   delivery: { type: Boolean, required: true },
@@ -15,6 +15,8 @@ const orderSchema = new mongoose.Schema({
   startTime: { type: String },
   endTime: { type: String },
   status: { type: String, default: "new" },
+  paymentMethodId: { type: String }, // ← для карты
+  paid: { type: Boolean, default: false }, // ← оплачено или нет
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -24,7 +26,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// POST /orders — теперь строго требует userId
+// POST /orders
 app.post('/orders', async (req, res) => {
   try {
     const { userId } = req.body;
@@ -53,7 +55,7 @@ app.post('/orders', async (req, res) => {
       }
     }
 
-    const order = new Order(req.body); // userId теперь обязателен в body
+    const order = new Order(req.body);
     await order.save();
     res.json({ success: true, orderId: order._id });
   } catch (error) {
@@ -73,7 +75,7 @@ app.get('/orders/:userId', async (req, res) => {
   }
 });
 
-// Остальные эндпоинты без изменений
+// GET /tables/available
 app.get('/tables/available', async (req, res) => {
   try {
     const { date, start, duration = 120 } = req.query;
@@ -99,6 +101,7 @@ app.get('/tables/available', async (req, res) => {
   }
 });
 
+// GET /tables/available-interval
 app.get('/tables/available-interval', async (req, res) => {
   try {
     const { date, start, end } = req.query;

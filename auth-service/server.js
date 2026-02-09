@@ -187,15 +187,33 @@ app.post('/register', async (req, res) => {
 
 // Логин
 app.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ error: "Введите логин/email и пароль" });
-
-  const user = await User.findOne({ $or: [{ email }, { login: email }] });
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(401).json({ error: "Неверный логин/email или пароль" });
+  let { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: "Введите логин/email и пароль" });
   }
 
-  const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: THIRTY_DAYS });
+  email = email.trim().toLowerCase();
+
+  const user = await User.findOne({
+    $or: [
+      { email: email },
+      { login: email }
+    ]
+  });
+
+  if (!user) {
+    return res.status(401).json({ error: "Пользователь не найден" });
+  }
+
+  const isValid = await bcrypt.compare(password, user.password);
+  if (!isValid) {
+    return res.status(401).json({ error: "Неверный пароль" });
+  }
+
+  const token = jwt.sign({ userId: user._id }, JWT_SECRET, {
+    expiresIn: THIRTY_DAYS
+  });
+
   res.json({
     token,
     user: {
@@ -208,6 +226,7 @@ app.post('/login', async (req, res) => {
     }
   });
 });
+
 
 // Уведомления
 app.get('/notifications', async (req, res) => {
@@ -319,6 +338,24 @@ app.post('/admin/edit-request/:id/resolve', async (req, res) => {
       avatar: updatedUser.avatar
     } : null
   });
+});
+
+// Удалить карту
+app.delete('/payment-methods/:pmId', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: "Нет токена" });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await User.findById(decoded.userId);
+    if (!user || !user.stripeCustomerId) return res.status(404).json({ error: "Нет клиента" });
+
+    await stripe.paymentMethods.detach(req.params.pmId);
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.listen(5002, () => console.log("Auth Service: http://localhost:5002"));
