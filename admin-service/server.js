@@ -69,7 +69,11 @@ app.get('/admin/orders/pending', async (req, res) => {
         quantity: item.quantity,
         price: item.price
       }));
-      return { ...order.toObject(), items: enrichedItems };
+      return { 
+        ...order.toObject(), 
+        items: enrichedItems,
+        paid: order.paid || false  // ← здесь, в корне объекта
+      };
     });
 
     res.json(enriched);
