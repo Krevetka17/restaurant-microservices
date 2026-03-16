@@ -1,5 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
 const cors = require('cors');
 
 mongoose.connect('mongodb://localhost:27017/order_db');
@@ -15,8 +16,12 @@ const orderSchema = new mongoose.Schema({
   startTime: { type: String },
   endTime: { type: String },
   status: { type: String, default: "new" },
-  paymentMethodId: { type: String }, // ← для карты
-  paid: { type: Boolean, default: false }, // ← оплачено или нет
+  paymentMethodId: { type: String },
+  paid: { type: Boolean, default: false },
+  reviewed: { type: Boolean, default: false },
+  reviewComment: String,
+  reviewRating: Number,
+  reviewApproved: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -134,5 +139,40 @@ function formatTime(minutes) {
   const m = (minutes % 60).toString().padStart(2, '0');
   return `${h}:${m}`;
 }
+
+app.post('/orders/:orderId/review', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: "Нет токена" });
+
+  try {
+    const decoded = jwt.verify(token, "secret123");
+    const { comment, rating, edited } = req.body;
+    const order = await Order.findOne({ _id: req.params.orderId, userId: decoded.userId });
+
+    if (!order) return res.status(404).json({ error: "Заказ не найден" });
+    if (order.status !== "confirmed") return res.status(400).json({ error: "Заказ не подтверждён" });
+
+    order.reviewed = true;
+    order.reviewComment = comment;
+    order.reviewRating = Number(rating);
+    order.reviewApproved = false;
+
+    if (edited === "true") {
+      // Отправляем уведомление админу
+      await Notification.create({
+        userId: decoded.userId,
+        title: "Отредактирован отзыв",
+        message: `Пользователь отредактировал отзыв к заказу №${order._id.toString().slice(-6)}. Комментарий: ${comment}`,
+        category: "Отзывы"
+      });
+    }
+
+    await order.save();
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.listen(5003, () => console.log("Order Service: http://localhost:5003"));

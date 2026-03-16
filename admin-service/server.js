@@ -21,7 +21,8 @@ const Order = orderConn.model('Order', new mongoose.Schema({
   endTime: { type: String },
   status: { type: String, default: "new" },
   rejectionReason: { type: String },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  reviewApproved: { type: Boolean, default: false }
 }));
 
 // Подключение к auth_db для уведомлений
@@ -72,7 +73,7 @@ app.get('/admin/orders/pending', async (req, res) => {
       return { 
         ...order.toObject(), 
         items: enrichedItems,
-        paid: order.paid || false  // ← здесь, в корне объекта
+        paid: order.paid || false  // в корне объекта
       };
     });
 
@@ -129,6 +130,95 @@ app.post('/admin/orders/:id/reject', async (req, res) => {
   } catch (error) {
     console.error('Ошибка отклонения:', error);
     res.status(500).json({ success: false });
+  }
+});
+
+
+app.post('/orders/:orderId/review', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: "Нет токена" });
+
+  try {
+    const decoded = jwt.verify(token, "secret123");
+    const { comment, rating, edited } = req.body;
+    const order = await Order.findOne({ _id: req.params.orderId, userId: decoded.userId });
+
+    if (!order) return res.status(404).json({ error: "Заказ не найден" });
+    if (order.status !== "confirmed") return res.status(400).json({ error: "Заказ не подтверждён" });
+
+    order.reviewed = true;
+    order.reviewComment = comment;
+    order.reviewRating = Number(rating);
+    order.reviewApproved = false;  
+
+    if (edited === "true") {
+      await Notification.create({
+        userId: decoded.userId,
+        title: "Отредактирован отзыв",
+        message: `Пользователь отредактировал отзыв к заказу №${order._id.toString().slice(-6)}. Комментарий: ${comment}`,
+        category: "Отзывы"
+      });
+    } else {
+      await Notification.create({
+        userId: decoded.userId,
+        title: "Новый отзыв на проверке",
+        message: `Новый отзыв к заказу №${order._id.toString().slice(-6)}. Рейтинг: ${rating}, Комментарий: ${comment}`,
+        category: "Отзывы"
+      });
+    }
+
+    await order.save();
+    res.json({ success: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/admin/reviews/pending', async (req, res) => {
+  try {
+    const pending = await Order.find({
+      reviewed: true,
+      reviewApproved: false,
+      reviewComment: { $exists: true, $ne: "" }
+    }).sort({ updatedAt: -1 });
+
+    res.json(pending.map(order => ({
+      _id: order._id,
+      userId: order.userId,
+      orderNumber: order._id.toString().slice(-6),
+      rating: order.reviewRating,
+      comment: order.reviewComment,
+      createdAt: order.updatedAt || order.createdAt,
+      items: order.items // если нужно показывать блюда
+    })));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/reviews/:orderId/approve', async (req, res) => {
+  try {
+    const order = await Order.findByIdAndUpdate(
+      req.params.orderId,
+      { reviewApproved: true },
+      { new: true }
+    );
+
+    if (!order) return res.status(404).json({ error: "Отзыв не найден" });
+
+    // Уведомление пользователю
+    await Notification.create({
+      userId: order.userId,
+      title: "Ваш отзыв одобрен",
+      message: `Отзыв к заказу №${order._id.toString().slice(-6)} прошёл модерацию и теперь виден всем.`,
+      category: "Отзывы"
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 

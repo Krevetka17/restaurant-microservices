@@ -358,4 +358,67 @@ app.delete('/payment-methods/:pmId', async (req, res) => {
   }
 });
 
+// Схема заказа (добавь в начало файла, если нет)
+const orderSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  items: Array,
+  total: Number,
+  delivery: Boolean,
+  address: String,
+  tableNumber: Number,
+  reservationDate: String,
+  startTime: String,
+  endTime: String,
+  paymentMethod: String,
+  paymentMethodId: String,
+  status: { type: String, default: "new" },
+  paid: { type: Boolean, default: false },
+  reviewed: { type: Boolean, default: false },           // ← новое
+  reviewComment: String,                                 // ← новое
+  reviewRating: Number,                                  // ← новое
+  createdAt: { type: Date, default: Date.now }
+});
+
+const Order = mongoose.model('Order', orderSchema);
+
+// Получить свои заказы (для PendingReviews)
+app.get('/orders/my', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: "Нет токена" });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const orders = await Order.find({ userId: decoded.userId })
+      .sort({ createdAt: -1 });
+    res.json(orders);
+  } catch (e) {
+    res.status(401).json({ error: "Недействительный токен" });
+  }
+});
+
+// Отправить отзыв
+app.post('/orders/:orderId/review', async (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: "Нет токена" });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const { comment, rating } = req.body;
+    const order = await Order.findOne({ _id: req.params.orderId, userId: decoded.userId });
+
+    if (!order) return res.status(404).json({ error: "Заказ не найден" });
+    if (order.status !== "completed") return res.status(400).json({ error: "Заказ не завершён" });
+    if (order.reviewed) return res.status(400).json({ error: "Отзыв уже оставлен" });
+
+    order.reviewed = true;
+    order.reviewComment = comment;
+    order.reviewRating = rating;
+    await order.save();
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.listen(5002, () => console.log("Auth Service: http://localhost:5002"));
