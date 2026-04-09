@@ -60,7 +60,10 @@ const getMenu = async () => {
 
 app.get('/admin/orders/pending', async (req, res) => {
   try {
-    const pending = await Order.find({ status: "new" }).sort({ createdAt: -1 });
+    const pending = await Order.find({ 
+      status: { $in: ["new", "confirmed"] },
+      delivery: false 
+  }).sort({ createdAt: -1 });
     const menuMap = await getMenu();
 
     const enriched = pending.map(order => {
@@ -172,6 +175,33 @@ app.post('/orders/:orderId/review', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/booking/:orderId/cancel', async (req, res) => {
+  try {
+    const { reason } = req.body;
+    if (!reason) return res.status(400).json({ success: false, message: "Причина обязательна" });
+
+    const order = await Order.findByIdAndUpdate(
+      req.params.orderId,
+      { status: "cancelled_by_admin", rejectionReason: reason },
+      { new: true }
+    );
+
+    if (!order) return res.status(404).json({ success: false });
+
+    await Notification.create({
+      userId: order.userId,
+      title: "Бронь отменена администрацией",
+      message: `Ваша бронь столика №${order.tableNumber} на ${order.reservationDate} отменена.\nПричина: ${reason}`,
+      category: "Администрация"
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false });
   }
 });
 

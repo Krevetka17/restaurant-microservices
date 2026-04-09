@@ -196,8 +196,8 @@ app.post('/login', async (req, res) => {
 
   const user = await User.findOne({
     $or: [
-      { email: email },
-      { login: email }
+      { email: email.trim().toLowerCase() },
+      { login: email.trim().toLowerCase() }
     ]
   });
 

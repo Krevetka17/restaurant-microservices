@@ -12,6 +12,7 @@ const orderSchema = new mongoose.Schema({
   delivery: { type: Boolean, required: true },
   address: { type: String },
   tableNumber: { type: Number },
+  tableDescription: { type: String },        // Новое поле
   reservationDate: { type: String },
   startTime: { type: String },
   endTime: { type: String },
@@ -31,6 +32,34 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ====================== ИНФОРМАЦИЯ О СТОЛИКАХ (20 столиков) ======================
+const tablesInfo = [
+  { number: 1,  capacity: 2, description: "Столик у окна, специально для двоих" },
+  { number: 2,  capacity: 2, description: "Уютный столик у стены для пары" },
+  { number: 3,  capacity: 4, description: "Столик у окна на 4 человека" },
+  { number: 4,  capacity: 4, description: "Большой столик в центре зала на 4 человека" },
+  { number: 5,  capacity: 3, description: "Столик у стены для небольшой компании" },
+  { number: 6,  capacity: 6, description: "Просторный столик у окна на 6 человек" },
+  { number: 7,  capacity: 2, description: "Романтический столик у окна" },
+  { number: 8,  capacity: 4, description: "Столик у стены на 4 человека" },
+  { number: 9,  capacity: 8, description: "Большой стол для компании до 8 человек" },
+  { number: 10, capacity: 8, description: "Большой стол для компании до 8 человек" },
+  { number: 11, capacity: 2, description: "Столик у окна для двоих" },
+  { number: 12, capacity: 4, description: "Столик в тихом углу на 4 человека" },
+  { number: 13, capacity: 3, description: "Небольшой столик у стены" },
+  { number: 14, capacity: 6, description: "Столик у окна для компании" },
+  { number: 15, capacity: 4, description: "Столик у стены на 4 человека" },
+  { number: 16, capacity: 2, description: "Уютный столик для пары" },
+  { number: 17, capacity: 4, description: "Столик в центре на 4 человека" },
+  { number: 18, capacity: 6, description: "Просторный стол на 6 человек" },
+  { number: 19, capacity: 8, description: "Большой стол для большой компании до 8 человек" },
+  { number: 20, capacity: 8, description: "Большой стол для компании до 8 человек" }
+];
+
+app.get('/tables/info', (req, res) => {
+  res.json(tablesInfo);
+});
+
 // POST /orders
 app.post('/orders', async (req, res) => {
   try {
@@ -39,28 +68,34 @@ app.post('/orders', async (req, res) => {
       return res.status(400).json({ success: false, message: "userId обязателен" });
     }
 
-    const { delivery, tableNumber, reservationDate, startTime, endTime } = req.body;
+    const { delivery, tableNumber, reservationDate, startTime, endTime, tableDescription } = req.body;
 
-    if (!delivery && endTime) {
-      if (!tableNumber || !reservationDate || !startTime || !endTime) {
-        return res.status(400).json({ success: false, message: "Для брони нужны все данные" });
+    if (!delivery) {
+      if (endTime) {
+        // Бронь столика с временем
+        if (!tableNumber || !reservationDate || !startTime || !endTime) {
+          return res.status(400).json({ success: false, message: "Для брони столика нужны все данные" });
+        }
+
+        const conflicting = await Order.findOne({
+          delivery: false,
+          tableNumber,
+          reservationDate,
+          $or: [{ startTime: { $lt: endTime }, endTime: { $gt: startTime } }]
+        });
+
+        if (conflicting) {
+          return res.status(400).json({ success: false, message: "Столик занят на это время" });
+        }
       }
-
-      const conflicting = await Order.findOne({
-        delivery: false,
-        tableNumber,
-        reservationDate,
-        $or: [
-          { startTime: { $lt: endTime }, endTime: { $gt: startTime } }
-        ]
-      });
-
-      if (conflicting) {
-        return res.status(400).json({ success: false, message: "Столик занят на это время" });
-      }
+      // Если endTime нет — простой заказ "на месте" без брони времени
     }
 
-    const order = new Order(req.body);
+    const order = new Order({
+      ...req.body,
+      tableDescription: tableDescription || null
+    });
+
     await order.save();
     res.json({ success: true, orderId: order._id });
   } catch (error) {
@@ -80,7 +115,7 @@ app.get('/orders/:userId', async (req, res) => {
   }
 });
 
-// GET /tables/available
+// GET /tables/available — 20 столиков
 app.get('/tables/available', async (req, res) => {
   try {
     const { date, start, duration = 120 } = req.query;
@@ -89,14 +124,12 @@ app.get('/tables/available', async (req, res) => {
     const endMinutes = parseTime(start) + parseInt(duration) + 45;
     const endTime = formatTime(endMinutes);
 
-    const allTables = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const allTables = Array.from({ length: 20 }, (_, i) => i + 1);
 
     const booked = await Order.find({
       delivery: false,
       reservationDate: date,
-      $or: [
-        { startTime: { $lt: endTime }, endTime: { $gt: start } }
-      ]
+      $or: [{ startTime: { $lt: endTime }, endTime: { $gt: start } }]
     }).distinct('tableNumber');
 
     const available = allTables.filter(t => !booked.includes(t));
@@ -112,14 +145,12 @@ app.get('/tables/available-interval', async (req, res) => {
     const { date, start, end } = req.query;
     if (!date || !start || !end) return res.status(400).json({ success: false, message: "Нужны date, start, end" });
 
-    const allTables = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const allTables = Array.from({ length: 20 }, (_, i) => i + 1);
 
     const booked = await Order.find({
       delivery: false,
       reservationDate: date,
-      $or: [
-        { startTime: { $lt: end }, endTime: { $gt: start } }
-      ]
+      $or: [{ startTime: { $lt: end }, endTime: { $gt: start } }]
     }).distinct('tableNumber');
 
     const available = allTables.filter(t => !booked.includes(t));
@@ -157,21 +188,34 @@ app.post('/orders/:orderId/review', async (req, res) => {
     order.reviewRating = Number(rating);
     order.reviewApproved = false;
 
-    if (edited === "true") {
-      // Отправляем уведомление админу
-      await Notification.create({
-        userId: decoded.userId,
-        title: "Отредактирован отзыв",
-        message: `Пользователь отредактировал отзыв к заказу №${order._id.toString().slice(-6)}. Комментарий: ${comment}`,
-        category: "Отзывы"
-      });
-    }
-
     await order.save();
     res.json({ success: true });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/admin/orders', async (req, res) => {
+  try {
+    const orders = await Order.find({}).sort({ createdAt: -1 });
+    res.json(orders);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Получить только ожидающие заказы (pending + confirmed)
+app.get('/admin/pending-orders', async (req, res) => {
+  try {
+    const orders = await Order.find({
+      status: { $in: ["new", "confirmed"] }
+    }).sort({ createdAt: -1 });
+    res.json(orders);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
